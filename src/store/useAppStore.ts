@@ -1,6 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
-  addDoc,
   arrayUnion,
   collection,
   doc,
@@ -12,6 +11,7 @@ import {
   query,
   setDoc,
   updateDoc,
+  writeBatch,
   where,
 } from 'firebase/firestore';
 import { create } from 'zustand';
@@ -21,6 +21,8 @@ import { auth, db, hasConfig } from '../lib/firebase';
 import { BoxItem, ChatMessage, CommonBox, Notification, RouteState, ThemeMode, User } from '../types/models';
 
 type Result = { ok: boolean; error?: string };
+type ToastTone = 'success' | 'error' | 'info';
+type Toast = { id: string; message: string; tone: ToastTone };
 
 type AppState = {
   themeMode: ThemeMode;
@@ -34,7 +36,10 @@ type AppState = {
   authReady: boolean;
   hasHydrated: boolean;
   firebaseEnabled: boolean;
+  toast?: Toast;
   toggleTheme: () => void;
+  showToast: (message: string, tone?: ToastTone) => void;
+  clearToast: () => void;
   setHydrated: (value: boolean) => void;
   initializeAuthListener: () => void;
   stopRealtimeSync: () => void;
@@ -82,6 +87,8 @@ const demoBoxes: CommonBox[] = [
 
 let authUnsubscribe: (() => void) | undefined;
 let realtimeUnsubscribe: (() => void) | undefined;
+let messagesUnsubscribe: (() => void) | undefined;
+let bindMessageListenerToBox: ((boxId?: string) => void) | undefined;
 
 const updateLocalItem = (boxes: CommonBox[], boxId: string, itemId: string, patch: Partial<BoxItem>) =>
   boxes.map((b) =>
@@ -89,6 +96,25 @@ const updateLocalItem = (boxes: CommonBox[], boxId: string, itemId: string, patc
       ? { ...b, items: b.items.map((it) => (it.id === itemId ? { ...it, ...patch } : it)) }
       : b
   );
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const withRetry = async <T>(operation: () => Promise<T>, retries = 2, baseDelayMs = 300): Promise<T> => {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (attempt === retries) break;
+      await sleep(baseDelayMs * 2 ** attempt);
+    }
+  }
+  throw lastError;
+};
+
+const sortByCreatedAtDesc = <T extends { createdAt: string }>(items: T[]) =>
+  [...items].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
 export const useAppStore = create<AppState>()(
   persist(
@@ -104,8 +130,21 @@ export const useAppStore = create<AppState>()(
       authReady: !hasConfig,
       hasHydrated: false,
       firebaseEnabled: hasConfig,
+      toast: undefined,
 
       setHydrated: (value) => set({ hasHydrated: value }),
+
+      showToast: (message, tone = 'info') => {
+        const toast: Toast = { id: id(), message, tone };
+        set({ toast });
+        setTimeout(() => {
+          if (get().toast?.id === toast.id) {
+            set({ toast: undefined });
+          }
+        }, 3200);
+      },
+
+      clearToast: () => set({ toast: undefined }),
 
       toggleTheme: () => set((state) => ({ themeMode: state.themeMode === 'light' ? 'dark' : 'light' })),
 
@@ -120,6 +159,9 @@ export const useAppStore = create<AppState>()(
           if (!firebaseUser) {
             realtimeUnsubscribe?.();
             realtimeUnsubscribe = undefined;
+            messagesUnsubscribe?.();
+            messagesUnsubscribe = undefined;
+            bindMessageListenerToBox = undefined;
             set({ currentUserId: undefined, authReady: true, route: { name: 'home' } });
             return;
           }
@@ -140,6 +182,27 @@ export const useAppStore = create<AppState>()(
           set({ currentUserId: firebaseUser.uid, authReady: true });
           get().stopRealtimeSync();
 
+          const attachMessagesListener = (boxId?: string) => {
+            messagesUnsubscribe?.();
+            messagesUnsubscribe = undefined;
+            if (!boxId) {
+              set({ messages: [] });
+              return;
+            }
+            messagesUnsubscribe = onSnapshot(
+              query(
+                collection(firestore, 'messages'),
+                where('boxId', '==', boxId),
+                orderBy('createdAt', 'desc')
+              ),
+              (snapshot) => {
+                const messages = snapshot.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ChatMessage, 'id'>) }));
+                set({ messages });
+              }
+            );
+          };
+          bindMessageListenerToBox = attachMessagesListener;
+
           const unsubs: Array<() => void> = [];
           unsubs.push(
             onSnapshot(collection(firestore, 'users'), (snapshot) => {
@@ -154,31 +217,41 @@ export const useAppStore = create<AppState>()(
                 const boxes = snapshot.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<CommonBox, 'id'>) }));
                 set((state) => ({
                   boxes,
-                  selectedBoxId: state.selectedBoxId && boxes.some((b) => b.id === state.selectedBoxId)
-                    ? state.selectedBoxId
-                    : boxes[0]?.id,
+                  selectedBoxId:
+                    state.selectedBoxId && boxes.some((b) => b.id === state.selectedBoxId)
+                      ? state.selectedBoxId
+                      : boxes[0]?.id,
                 }));
+                const selected =
+                  get().selectedBoxId && boxes.some((b) => b.id === get().selectedBoxId)
+                    ? get().selectedBoxId
+                    : boxes[0]?.id;
+                attachMessagesListener(selected);
               }
             )
           );
           unsubs.push(
-            onSnapshot(query(collection(firestore, 'messages'), orderBy('createdAt', 'desc')), (snapshot) => {
-              const messages = snapshot.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ChatMessage, 'id'>) }));
-              set({ messages });
-            })
-          );
-          unsubs.push(
-            onSnapshot(query(collection(firestore, 'notifications'), orderBy('createdAt', 'desc')), (snapshot) => {
-              const notifications = snapshot.docs.map((d) => ({
-                id: d.id,
-                ...(d.data() as Omit<Notification, 'id'>),
-              }));
-              set({ notifications });
-            })
+            onSnapshot(
+              query(
+                collection(firestore, 'notifications'),
+                where('audienceUserIds', 'array-contains', firebaseUser.uid),
+                orderBy('createdAt', 'desc')
+              ),
+              (snapshot) => {
+                const notifications = snapshot.docs.map((d) => ({
+                  id: d.id,
+                  ...(d.data() as Omit<Notification, 'id'>),
+                }));
+                set({ notifications });
+              }
+            )
           );
 
           realtimeUnsubscribe = () => {
             unsubs.forEach((fn) => fn());
+            messagesUnsubscribe?.();
+            messagesUnsubscribe = undefined;
+            bindMessageListenerToBox = undefined;
             realtimeUnsubscribe = undefined;
           };
         });
@@ -186,6 +259,9 @@ export const useAppStore = create<AppState>()(
 
       stopRealtimeSync: () => {
         realtimeUnsubscribe?.();
+        messagesUnsubscribe?.();
+        bindMessageListenerToBox = undefined;
+        messagesUnsubscribe = undefined;
         realtimeUnsubscribe = undefined;
       },
 
@@ -255,7 +331,10 @@ export const useAppStore = create<AppState>()(
 
       navigate: (route) => set({ route }),
 
-      selectBox: (boxId) => set({ selectedBoxId: boxId, route: { name: 'home', boxId } }),
+      selectBox: (boxId) => {
+        set({ selectedBoxId: boxId, route: { name: 'home', boxId } });
+        bindMessageListenerToBox?.(boxId);
+      },
 
       addFriendByEmail: async (email) => {
         const currentUserId = get().currentUserId;
@@ -280,6 +359,7 @@ export const useAppStore = create<AppState>()(
             notifications: [
               {
                 id: id(),
+                audienceUserIds: [currentUserId, target.id],
                 actorUserId: currentUserId,
                 message: `${currentUser.name} added ${target.name} as a friend.`,
                 type: 'friend_added',
@@ -289,6 +369,7 @@ export const useAppStore = create<AppState>()(
               ...state.notifications,
             ],
           }));
+          get().showToast('Friend added.', 'success');
           return { ok: true };
         }
 
@@ -302,16 +383,49 @@ export const useAppStore = create<AppState>()(
         if (target.id === currentUserId) return { ok: false, error: 'You cannot add yourself.' };
         if (currentUser.friendIds.includes(target.id)) return { ok: false, error: 'Already friends.' };
 
-        await updateDoc(doc(firestore, 'users', currentUserId), { friendIds: arrayUnion(target.id) });
-        await updateDoc(doc(firestore, 'users', target.id), { friendIds: arrayUnion(currentUserId) });
-        await addDoc(collection(firestore, 'notifications'), {
+        const previousUsers = get().users;
+        const notificationId = id();
+        const newNotification: Notification = {
+          id: notificationId,
+          audienceUserIds: [currentUserId, target.id],
           actorUserId: currentUserId,
           message: `${currentUser.name} added ${target.name} as a friend.`,
           type: 'friend_added',
           createdAt: nowIso(),
           seenBy: [currentUserId],
-        });
-        return { ok: true };
+        };
+
+        set((state) => ({
+          users: state.users.map((u) => {
+            if (u.id === currentUserId) return { ...u, friendIds: [...u.friendIds, target.id] };
+            if (u.id === target.id) return { ...u, friendIds: [...u.friendIds, currentUserId] };
+            return u;
+          }),
+          notifications: [newNotification, ...state.notifications],
+        }));
+
+        try {
+          await withRetry(async () => {
+            const batch = writeBatch(firestore);
+            batch.update(doc(firestore, 'users', currentUserId), { friendIds: arrayUnion(target.id) });
+            batch.update(doc(firestore, 'users', target.id), { friendIds: arrayUnion(currentUserId) });
+            batch.set(doc(firestore, 'notifications', notificationId), {
+              audienceUserIds: newNotification.audienceUserIds,
+              actorUserId: currentUserId,
+              message: newNotification.message,
+              type: 'friend_added',
+              createdAt: newNotification.createdAt,
+              seenBy: [currentUserId],
+            });
+            await batch.commit();
+          });
+          get().showToast('Friend added.', 'success');
+          return { ok: true };
+        } catch {
+          set({ users: previousUsers, notifications: get().notifications.filter((n) => n.id !== notificationId) });
+          get().showToast('Failed to add friend. Please retry.', 'error');
+          return { ok: false, error: 'Failed to add friend. Please retry.' };
+        }
       },
 
       addBox: async (name, participantIds) => {
@@ -321,26 +435,42 @@ export const useAppStore = create<AppState>()(
         if (!cleanName) return { ok: false, error: 'Box name is required.' };
 
         const allParticipants = Array.from(new Set([currentUserId, ...participantIds]));
+        const boxId = id();
+        const newBox: CommonBox = { id: boxId, name: cleanName, participantIds: allParticipants, items: [] };
 
         if (!hasConfig || !db) {
-          const newBox: CommonBox = { id: id(), name: cleanName, participantIds: allParticipants, items: [] };
           set((state) => ({
             boxes: [newBox, ...state.boxes],
             selectedBoxId: newBox.id,
             route: { name: 'home', boxId: newBox.id },
           }));
+          get().showToast('CommonBox created.', 'success');
           return { ok: true };
         }
 
         const firestore = db;
         if (!firestore) return { ok: false, error: 'Firebase DB unavailable.' };
-        const ref = await addDoc(collection(firestore, 'boxes'), {
-          name: cleanName,
-          participantIds: allParticipants,
-          items: [],
-        });
-        set({ selectedBoxId: ref.id, route: { name: 'home', boxId: ref.id } });
-        return { ok: true };
+        const previousBoxes = get().boxes;
+        set((state) => ({
+          boxes: [newBox, ...state.boxes],
+          selectedBoxId: boxId,
+          route: { name: 'home', boxId },
+        }));
+        try {
+          await withRetry(() =>
+            setDoc(doc(firestore, 'boxes', boxId), {
+              name: cleanName,
+              participantIds: allParticipants,
+              items: [],
+            })
+          );
+          get().showToast('CommonBox created.', 'success');
+          return { ok: true };
+        } catch {
+          set({ boxes: previousBoxes });
+          get().showToast('Failed to create box. Please retry.', 'error');
+          return { ok: false, error: 'Failed to create box. Please retry.' };
+        }
       },
 
       addItem: async (boxId, label, ownerUserId) => {
@@ -369,13 +499,26 @@ export const useAppStore = create<AppState>()(
           set((state) => ({
             boxes: state.boxes.map((b) => (b.id === boxId ? { ...b, items: [newItem, ...b.items] } : b)),
           }));
+          get().showToast('Item added.', 'success');
           return { ok: true };
         }
 
         const firestore = db;
         if (!firestore) return { ok: false, error: 'Firebase DB unavailable.' };
-        await updateDoc(doc(firestore, 'boxes', boxId), { items: [newItem, ...targetBox.items] });
-        return { ok: true };
+        const previousBoxes = get().boxes;
+        const optimisticItems = [newItem, ...targetBox.items];
+        set((state) => ({
+          boxes: state.boxes.map((b) => (b.id === boxId ? { ...b, items: optimisticItems } : b)),
+        }));
+        try {
+          await withRetry(() => updateDoc(doc(firestore, 'boxes', boxId), { items: optimisticItems }));
+          get().showToast('Item added.', 'success');
+          return { ok: true };
+        } catch {
+          set({ boxes: previousBoxes });
+          get().showToast('Failed to add item. Please retry.', 'error');
+          return { ok: false, error: 'Failed to add item. Please retry.' };
+        }
       },
 
       raiseConcern: async (boxId, itemId) => {
@@ -397,6 +540,7 @@ export const useAppStore = create<AppState>()(
                 id: id(),
                 boxId,
                 itemId,
+                audienceUserIds: box.participantIds,
                 actorUserId: currentUserId,
                 message: `${actor.name} raised a concern: "${item.label}" might not belong to ${owner.name}.`,
                 type: 'ownership_concern',
@@ -406,22 +550,51 @@ export const useAppStore = create<AppState>()(
               ...state.notifications,
             ],
           }));
+          get().showToast('Concern raised.', 'success');
           return;
         }
 
         const updatedItems = box.items.map((it) => (it.id === itemId ? { ...it, hasConcern: true } : it));
         const firestore = db;
         if (!firestore) return;
-        await updateDoc(doc(firestore, 'boxes', boxId), { items: updatedItems });
-        await addDoc(collection(firestore, 'notifications'), {
+        const previousBoxes = get().boxes;
+        const notificationId = id();
+        const notification: Notification = {
+          id: notificationId,
           boxId,
           itemId,
+          audienceUserIds: box.participantIds,
           actorUserId: currentUserId,
           message: `${actor.name} raised a concern: "${item.label}" might not belong to ${owner.name}.`,
           type: 'ownership_concern',
           createdAt: nowIso(),
           seenBy: [currentUserId],
-        });
+        };
+        set((state) => ({
+          boxes: updateLocalItem(state.boxes, boxId, itemId, { hasConcern: true }),
+          notifications: [notification, ...state.notifications],
+        }));
+        try {
+          await withRetry(async () => {
+            const batch = writeBatch(firestore);
+            batch.update(doc(firestore, 'boxes', boxId), { items: updatedItems });
+            batch.set(doc(firestore, 'notifications', notificationId), {
+              boxId,
+              itemId,
+              audienceUserIds: box.participantIds,
+              actorUserId: currentUserId,
+              message: notification.message,
+              type: 'ownership_concern',
+              createdAt: notification.createdAt,
+              seenBy: [currentUserId],
+            });
+            await batch.commit();
+          });
+          get().showToast('Concern raised.', 'success');
+        } catch {
+          set({ boxes: previousBoxes, notifications: get().notifications.filter((n) => n.id !== notificationId) });
+          get().showToast('Failed to raise concern. Please retry.', 'error');
+        }
       },
 
       claimOwnership: async (boxId, itemId) => {
@@ -443,6 +616,7 @@ export const useAppStore = create<AppState>()(
                 id: id(),
                 boxId,
                 itemId,
+                audienceUserIds: box.participantIds,
                 actorUserId: currentUserId,
                 message: `${claimant.name} claimed ownership of "${item.label}".`,
                 type: 'ownership_claimed',
@@ -452,6 +626,7 @@ export const useAppStore = create<AppState>()(
               ...state.notifications,
             ],
           }));
+          get().showToast('Ownership claimed.', 'success');
           return;
         }
 
@@ -460,16 +635,47 @@ export const useAppStore = create<AppState>()(
         );
         const firestore = db;
         if (!firestore) return;
-        await updateDoc(doc(firestore, 'boxes', boxId), { items: updatedItems });
-        await addDoc(collection(firestore, 'notifications'), {
+        const previousBoxes = get().boxes;
+        const notificationId = id();
+        const notification: Notification = {
+          id: notificationId,
           boxId,
           itemId,
+          audienceUserIds: box.participantIds,
           actorUserId: currentUserId,
           message: `${claimant.name} claimed ownership of "${item.label}".`,
           type: 'ownership_claimed',
           createdAt: nowIso(),
           seenBy: [currentUserId],
-        });
+        };
+        set((state) => ({
+          boxes: updateLocalItem(state.boxes, boxId, itemId, {
+            ownerUserId: currentUserId,
+            hasConcern: false,
+          }),
+          notifications: [notification, ...state.notifications],
+        }));
+        try {
+          await withRetry(async () => {
+            const batch = writeBatch(firestore);
+            batch.update(doc(firestore, 'boxes', boxId), { items: updatedItems });
+            batch.set(doc(firestore, 'notifications', notificationId), {
+              boxId,
+              itemId,
+              audienceUserIds: box.participantIds,
+              actorUserId: currentUserId,
+              message: notification.message,
+              type: 'ownership_claimed',
+              createdAt: notification.createdAt,
+              seenBy: [currentUserId],
+            });
+            await batch.commit();
+          });
+          get().showToast('Ownership claimed.', 'success');
+        } catch {
+          set({ boxes: previousBoxes, notifications: get().notifications.filter((n) => n.id !== notificationId) });
+          get().showToast('Failed to claim ownership. Please retry.', 'error');
+        }
       },
 
       sendMessage: async (boxId, text) => {
@@ -493,13 +699,23 @@ export const useAppStore = create<AppState>()(
 
         const firestore = db;
         if (!firestore) return { ok: false, error: 'Firebase DB unavailable.' };
-        await addDoc(collection(firestore, 'messages'), {
-          boxId,
-          senderUserId: currentUserId,
-          text: cleanText,
-          createdAt: message.createdAt,
-        });
-        return { ok: true };
+        const previousMessages = get().messages;
+        set((state) => ({ messages: [message, ...state.messages] }));
+        try {
+          await withRetry(() =>
+            setDoc(doc(firestore, 'messages', message.id), {
+              boxId,
+              senderUserId: currentUserId,
+              text: cleanText,
+              createdAt: message.createdAt,
+            })
+          );
+          return { ok: true };
+        } catch {
+          set({ messages: previousMessages });
+          get().showToast('Failed to send message. Please retry.', 'error');
+          return { ok: false, error: 'Failed to send message. Please retry.' };
+        }
       },
 
       markNotificationSeen: async (notificationId) => {
@@ -520,9 +736,24 @@ export const useAppStore = create<AppState>()(
 
         const firestore = db;
         if (!firestore) return;
-        await updateDoc(doc(firestore, 'notifications', notificationId), {
-          seenBy: arrayUnion(currentUserId),
-        });
+        set((state) => ({
+          notifications: state.notifications.map((n) =>
+            n.id === notificationId ? { ...n, seenBy: [...n.seenBy, currentUserId] } : n
+          ),
+        }));
+        try {
+          await withRetry(() =>
+            updateDoc(doc(firestore, 'notifications', notificationId), {
+              seenBy: arrayUnion(currentUserId),
+            })
+          );
+        } catch {
+          set((state) => ({
+            notifications: state.notifications.map((n) =>
+              n.id === notificationId ? { ...n, seenBy: n.seenBy.filter((idValue) => idValue !== currentUserId) } : n
+            ),
+          }));
+        }
       },
     }),
     {

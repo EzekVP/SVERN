@@ -33,6 +33,7 @@ export type Notification = {
   id: string;
   boxId?: string;
   itemId?: string;
+  audienceUserIds: string[];
   actorUserId: string;
   message: string;
   type: NotificationType;
