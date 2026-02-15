@@ -1,0 +1,193 @@
+import { StyleSheet } from 'react-native';
+
+export const styles = StyleSheet.create({
+  page: {
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    gap: 12,
+  },
+  centered: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    flex: 1,
+  },
+  topBar: {
+    height: 64,
+    borderBottomWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+  },
+  topBarTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  iconButton: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderRadius: 10,
+  },
+  iconButtonText: {
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  card: {
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 14,
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
+  },
+  title: {
+    fontSize: 28,
+    fontWeight: '800',
+    letterSpacing: 0.4,
+  },
+  subtitle: {
+    fontSize: 13,
+    marginBottom: 12,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 6,
+  },
+  cardTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 8,
+  },
+  input: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 8,
+  },
+  primaryButton: {
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  primaryButtonText: {
+    color: '#ffffff',
+    fontWeight: '700',
+  },
+  link: {
+    marginTop: 10,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  rowBetween: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 8,
+  },
+  wrapRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  pill: {
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+  },
+  smallPill: {
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    alignSelf: 'flex-start',
+  },
+  itemRow: {
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 12,
+    marginTop: 10,
+  },
+  metricGrid: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  metricCard: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 10,
+  },
+  metricValue: {
+    marginTop: 4,
+    fontSize: 22,
+    fontWeight: '800',
+  },
+  chatBubble: {
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 10,
+    width: '84%',
+  },
+  errorText: {
+    marginTop: 4,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  drawerBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.22)',
+  },
+  drawerPanel: {
+    flex: 1,
+    borderRightWidth: 1,
+    paddingTop: 16,
+  },
+  drawerHeader: {
+    fontSize: 20,
+    fontWeight: '800',
+    marginBottom: 8,
+    paddingHorizontal: 16,
+  },
+  drawerLink: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginHorizontal: 16,
+    marginBottom: 8,
+  },
+  drawerAction: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginHorizontal: 16,
+    marginTop: 8,
+    alignItems: 'center',
+  },
+  separator: {
+    height: 1,
+    marginHorizontal: 16,
+    marginVertical: 8,
+  },
+  smallActionButton: {
+    marginTop: 10,
+    alignSelf: 'flex-start',
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+  },
+  marbleBlob: {
+    position: 'absolute',
+    borderRadius: 999,
+    opacity: 0.45,
+  },
+});

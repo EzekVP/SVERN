@@ -1,20 +1,40 @@
+import { useEffect } from 'react';
+import { ActivityIndicator, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import { useAppStore } from './src/store/useAppStore';
+import { getTheme } from './src/theme';
+import { MarbleBackdrop } from './src/components/MarbleBackdrop';
+import { AuthScreen } from './src/screens/AuthScreen';
+import { AuthedShell } from './src/components/AuthedShell';
 
 export default function App() {
+  const themeMode = useAppStore((s) => s.themeMode);
+  const currentUserId = useAppStore((s) => s.currentUserId);
+  const initializeAuthListener = useAppStore((s) => s.initializeAuthListener);
+  const hasHydrated = useAppStore((s) => s.hasHydrated);
+  const authReady = useAppStore((s) => s.authReady);
+  const colors = getTheme(themeMode);
+
+  useEffect(() => {
+    initializeAuthListener();
+  }, [initializeAuthListener]);
+
+  const loading = !hasHydrated || !authReady;
+
   return (
-    <View style={styles.container}>
-      <Text>Open up App.tsx to start working on your app!</Text>
-      <StatusBar style="auto" />
-    </View>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
+      <StatusBar style={themeMode === 'dark' ? 'light' : 'dark'} />
+      <MarbleBackdrop colors={colors} />
+      {loading ? (
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          <ActivityIndicator color={colors.accent} />
+        </View>
+      ) : currentUserId ? (
+        <AuthedShell colors={colors} />
+      ) : (
+        <AuthScreen colors={colors} />
+      )}
+    </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});
