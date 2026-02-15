@@ -7,6 +7,7 @@ import { getTheme } from './src/theme';
 import { MarbleBackdrop } from './src/components/MarbleBackdrop';
 import { AuthScreen } from './src/screens/AuthScreen';
 import { AuthedShell } from './src/components/AuthedShell';
+import { ToastBanner } from './src/components/ToastBanner';
 
 export default function App() {
   const themeMode = useAppStore((s) => s.themeMode);
@@ -14,6 +15,8 @@ export default function App() {
   const initializeAuthListener = useAppStore((s) => s.initializeAuthListener);
   const hasHydrated = useAppStore((s) => s.hasHydrated);
   const authReady = useAppStore((s) => s.authReady);
+  const toast = useAppStore((s) => s.toast);
+  const clearToast = useAppStore((s) => s.clearToast);
   const colors = getTheme(themeMode);
 
   useEffect(() => {
@@ -35,6 +38,7 @@ export default function App() {
       ) : (
         <AuthScreen colors={colors} />
       )}
+      <ToastBanner toast={toast} colors={colors} onDismiss={clearToast} />
     </SafeAreaView>
   );
 }
