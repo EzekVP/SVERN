@@ -7,6 +7,7 @@ export type NotificationType = 'ownership_concern' | 'ownership_claimed' | 'frie
 export type User = {
   id: string;
   name: string;
+  username?: string;
   email: string;
   friendIds: string[];
 };
