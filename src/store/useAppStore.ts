@@ -313,7 +313,9 @@ export const useAppStore = create<AppState>()(
         }
 
         if (!hasConfig || !auth || !db) {
-          if (get().users.some((u) => u.email === cleanEmail)) return { ok: false, error: 'Email already exists.' };
+          if (get().users.some((u) => u.email === cleanEmail)) {
+            return { ok: false, error: 'An account with this email already exists.' };
+          }
           const newUser: User = { id: id(), name: cleanName, username, email: cleanEmail, friendIds: [] };
           set((state) => ({
             users: [...state.users, newUser],
@@ -336,13 +338,18 @@ export const useAppStore = create<AppState>()(
           });
           return { ok: true };
         } catch (error) {
+          if (error instanceof FirebaseError && error.code === 'auth/email-already-in-use') {
+            return { ok: false, error: 'An account with this email already exists.' };
+          }
           return { ok: false, error: formatFirebaseError(error, 'Sign up failed') };
         }
       },
 
       signIn: async (email, password) => {
         const cleanEmail = email.trim().toLowerCase();
-        if (!cleanEmail || !password.trim()) return { ok: false, error: 'Email and password are required.' };
+        if (!cleanEmail || !password.trim()) {
+          return { ok: false, error: 'Please enter both username and password.' };
+        }
 
         if (!hasConfig || !auth) {
           const existing = get().users.find((u) => u.email === cleanEmail);
@@ -358,6 +365,14 @@ export const useAppStore = create<AppState>()(
           await signInWithEmailAndPassword(auth, cleanEmail, password);
           return { ok: true };
         } catch (error) {
+          if (
+            error instanceof FirebaseError &&
+            ['auth/invalid-credential', 'auth/wrong-password', 'auth/user-not-found', 'auth/invalid-email'].includes(
+              error.code
+            )
+          ) {
+            return { ok: false, error: 'Incorrect username or password.' };
+          }
           return { ok: false, error: formatFirebaseError(error, 'Login failed') };
         }
       },
