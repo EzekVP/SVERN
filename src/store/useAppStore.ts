@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { FirebaseError } from 'firebase/app';
 import {
   arrayUnion,
   collection,
@@ -16,7 +17,14 @@ import {
 } from 'firebase/firestore';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
-import { createUserWithEmailAndPassword, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import {
+  createUserWithEmailAndPassword,
+  GoogleAuthProvider,
+  onAuthStateChanged,
+  signInWithCredential,
+  signInWithEmailAndPassword,
+  signOut,
+} from 'firebase/auth';
 import { auth, db, hasConfig } from '../lib/firebase';
 import { BoxItem, ChatMessage, CommonBox, Notification, RouteState, ThemeMode, User } from '../types/models';
 
@@ -45,6 +53,7 @@ type AppState = {
   stopRealtimeSync: () => void;
   signUp: (name: string, email: string, password: string) => Promise<Result>;
   signIn: (email: string, password: string) => Promise<Result>;
+  signInWithGoogle: (idToken: string) => Promise<Result>;
   logout: () => Promise<void>;
   navigate: (route: RouteState) => void;
   selectBox: (boxId: string) => void;
@@ -59,11 +68,21 @@ type AppState = {
 
 const nowIso = () => new Date().toISOString();
 const id = () => Math.random().toString(36).slice(2, 10);
+const toUsername = (value: string) => value.trim().toLowerCase().replace(/\s+/g, '_');
+const formatFirebaseError = (error: unknown, fallback: string) => {
+  if (error instanceof FirebaseError) {
+    return `${fallback} (${error.code}: ${error.message})`;
+  }
+  if (error instanceof Error) {
+    return `${fallback} (${error.message})`;
+  }
+  return fallback;
+};
 
 const demoUsers: User[] = [
-  { id: 'u1', name: 'Ava', email: 'ava@svern.app', friendIds: ['u2'] },
-  { id: 'u2', name: 'Ravi', email: 'ravi@svern.app', friendIds: ['u1', 'u3'] },
-  { id: 'u3', name: 'Mina', email: 'mina@svern.app', friendIds: ['u2'] },
+  { id: 'u1', name: 'Ava', username: 'ava', email: 'ava@svern.app', friendIds: ['u2'] },
+  { id: 'u2', name: 'Ravi', username: 'ravi', email: 'ravi@svern.app', friendIds: ['u1', 'u3'] },
+  { id: 'u3', name: 'Mina', username: 'mina', email: 'mina@svern.app', friendIds: ['u2'] },
 ];
 
 const demoBoxes: CommonBox[] = [
@@ -132,7 +151,10 @@ export const useAppStore = create<AppState>()(
       firebaseEnabled: hasConfig,
       toast: undefined,
 
-      setHydrated: (value) => set({ hasHydrated: value }),
+      setHydrated: (value) => {
+        console.log('[store] setHydrated', value);
+        set({ hasHydrated: value });
+      },
 
       showToast: (message, tone = 'info') => {
         const toast: Toast = { id: id(), message, tone };
@@ -149,13 +171,26 @@ export const useAppStore = create<AppState>()(
       toggleTheme: () => set((state) => ({ themeMode: state.themeMode === 'light' ? 'dark' : 'light' })),
 
       initializeAuthListener: () => {
+        console.log('[store] initializeAuthListener:start', {
+          hasConfig,
+          hasAuth: Boolean(auth),
+          hasDb: Boolean(db),
+          hasUnsubscribe: Boolean(authUnsubscribe),
+        });
         if (!hasConfig || !auth || !db || authUnsubscribe) {
+          console.log('[store] initializeAuthListener:skip -> authReady=true');
           set({ authReady: true });
           return;
         }
         const firestore = db;
+        console.log('[store] initializeAuthListener:attach listener');
+        set({ authReady: true });
 
         authUnsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+          console.log('[store] onAuthStateChanged', {
+            signedIn: Boolean(firebaseUser),
+            uid: firebaseUser?.uid ?? null,
+          });
           if (!firebaseUser) {
             realtimeUnsubscribe?.();
             realtimeUnsubscribe = undefined;
@@ -169,14 +204,18 @@ export const useAppStore = create<AppState>()(
           const userRef = doc(firestore, 'users', firebaseUser.uid);
           const snap = await getDoc(userRef);
           if (!snap.exists()) {
+            console.log('[store] user doc missing -> creating', { uid: firebaseUser.uid });
             const email = firebaseUser.email?.toLowerCase() || '';
             const defaultName = firebaseUser.displayName || email.split('@')[0] || 'Svern User';
+            const username = toUsername(defaultName) || 'svern_user';
             await setDoc(userRef, {
               id: firebaseUser.uid,
               name: defaultName,
+              username,
               email,
               friendIds: [],
             });
+            console.log('[store] user doc created', { uid: firebaseUser.uid });
           }
 
           set({ currentUserId: firebaseUser.uid, authReady: true });
@@ -268,13 +307,14 @@ export const useAppStore = create<AppState>()(
       signUp: async (name, email, password) => {
         const cleanName = name.trim();
         const cleanEmail = email.trim().toLowerCase();
+        const username = toUsername(cleanName);
         if (!cleanName || !cleanEmail || !password.trim()) {
           return { ok: false, error: 'Name, email, and password are required.' };
         }
 
         if (!hasConfig || !auth || !db) {
           if (get().users.some((u) => u.email === cleanEmail)) return { ok: false, error: 'Email already exists.' };
-          const newUser: User = { id: id(), name: cleanName, email: cleanEmail, friendIds: [] };
+          const newUser: User = { id: id(), name: cleanName, username, email: cleanEmail, friendIds: [] };
           set((state) => ({
             users: [...state.users, newUser],
             currentUserId: newUser.id,
@@ -290,12 +330,13 @@ export const useAppStore = create<AppState>()(
           await setDoc(doc(firestore, 'users', credential.user.uid), {
             id: credential.user.uid,
             name: cleanName,
+            username,
             email: cleanEmail,
             friendIds: [],
           });
           return { ok: true };
         } catch (error) {
-          return { ok: false, error: 'Sign up failed. Check credentials/config.' };
+          return { ok: false, error: formatFirebaseError(error, 'Sign up failed') };
         }
       },
 
@@ -316,8 +357,22 @@ export const useAppStore = create<AppState>()(
         try {
           await signInWithEmailAndPassword(auth, cleanEmail, password);
           return { ok: true };
-        } catch {
-          return { ok: false, error: 'Login failed. Check email/password.' };
+        } catch (error) {
+          return { ok: false, error: formatFirebaseError(error, 'Login failed') };
+        }
+      },
+
+      signInWithGoogle: async (idToken) => {
+        if (!idToken.trim()) return { ok: false, error: 'Google ID token is missing.' };
+        if (!hasConfig || !auth || !db) {
+          return { ok: false, error: 'Google sign-in requires Firebase config.' };
+        }
+        try {
+          const credential = GoogleAuthProvider.credential(idToken);
+          await signInWithCredential(auth, credential);
+          return { ok: true };
+        } catch (error) {
+          return { ok: false, error: formatFirebaseError(error, 'Google sign-in failed') };
         }
       },
 
@@ -770,6 +825,7 @@ export const useAppStore = create<AppState>()(
         route: state.route,
       }),
       onRehydrateStorage: () => (state) => {
+        console.log('[store] onRehydrateStorage:complete');
         state?.setHydrated(true);
       },
     }

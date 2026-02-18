@@ -13,17 +13,21 @@ export default function App() {
   const themeMode = useAppStore((s) => s.themeMode);
   const currentUserId = useAppStore((s) => s.currentUserId);
   const initializeAuthListener = useAppStore((s) => s.initializeAuthListener);
-  const hasHydrated = useAppStore((s) => s.hasHydrated);
   const authReady = useAppStore((s) => s.authReady);
   const toast = useAppStore((s) => s.toast);
   const clearToast = useAppStore((s) => s.clearToast);
   const colors = getTheme(themeMode);
 
   useEffect(() => {
+    console.log('[App] mount -> initializeAuthListener');
     initializeAuthListener();
   }, [initializeAuthListener]);
 
-  const loading = !hasHydrated || !authReady;
+  useEffect(() => {
+    console.log('[App] state', { authReady, currentUserId: currentUserId ?? null });
+  }, [authReady, currentUserId]);
+
+  const loading = !authReady;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
