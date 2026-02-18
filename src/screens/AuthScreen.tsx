@@ -21,6 +21,7 @@ export function AuthScreen({ colors }: Props) {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('ava@svern.app');
   const [password, setPassword] = useState('');
+  const [errorTitle, setErrorTitle] = useState('Login failed');
   const [error, setError] = useState<string | undefined>();
   const [googleBusy, setGoogleBusy] = useState(false);
   const [request, response, promptAsync] = Google.useAuthRequest({
@@ -34,8 +35,12 @@ export function AuthScreen({ colors }: Props) {
   const submit = async () => {
     const res =
       mode === 'signin' ? await signIn(email, password) : await signUp(name, email, password);
-    if (!res.ok) setError(res.error);
-    else setError(undefined);
+    if (!res.ok) {
+      setErrorTitle(mode === 'signin' ? 'Login failed' : 'Sign up failed');
+      setError(res.error);
+    } else {
+      setError(undefined);
+    }
   };
 
   useEffect(() => {
@@ -43,6 +48,7 @@ export function AuthScreen({ colors }: Props) {
       if (!response) return;
       if (response.type !== 'success') {
         if (response.type !== 'dismiss' && response.type !== 'cancel') {
+          setErrorTitle('Google sign-in failed');
           setError('Google sign-in was not completed.');
         }
         setGoogleBusy(false);
@@ -51,14 +57,19 @@ export function AuthScreen({ colors }: Props) {
 
       const idToken = response.authentication?.idToken ?? response.params?.id_token;
       if (!idToken) {
+        setErrorTitle('Google sign-in failed');
         setError('Google sign-in did not return an ID token.');
         setGoogleBusy(false);
         return;
       }
 
       const result = await signInWithGoogle(idToken);
-      if (!result.ok) setError(result.error);
-      else setError(undefined);
+      if (!result.ok) {
+        setErrorTitle('Google sign-in failed');
+        setError(result.error);
+      } else {
+        setError(undefined);
+      }
       setGoogleBusy(false);
     };
 
@@ -82,6 +93,7 @@ export function AuthScreen({ colors }: Props) {
             padding: 12,
           }}
         >
+          <Text style={{ color: colors.danger, fontWeight: '800', fontSize: 14, marginBottom: 4 }}>{errorTitle}</Text>
           <Text style={[styles.errorText, { color: colors.danger, marginTop: 0 }]}>{error}</Text>
           <Pressable
             onPress={() => setError(undefined)}
