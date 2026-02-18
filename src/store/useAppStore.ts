@@ -243,11 +243,33 @@ export const useAppStore = create<AppState>()(
           bindMessageListenerToBox = attachMessagesListener;
 
           const unsubs: Array<() => void> = [];
+          const userMap = new Map<string, User>();
+          const syncUsers = () => set({ users: Array.from(userMap.values()) });
           unsubs.push(
-            onSnapshot(collection(firestore, 'users'), (snapshot) => {
-              const users = snapshot.docs.map((d) => d.data() as User);
-              set({ users });
+            onSnapshot(doc(firestore, 'users', firebaseUser.uid), (snapshot) => {
+              if (snapshot.exists()) {
+                const selfUser = snapshot.data() as User;
+                userMap.set(selfUser.id, selfUser);
+              } else {
+                userMap.delete(firebaseUser.uid);
+              }
+              syncUsers();
             })
+          );
+          unsubs.push(
+            onSnapshot(
+              query(collection(firestore, 'users'), where('friendIds', 'array-contains', firebaseUser.uid)),
+              (snapshot) => {
+                const selfUser = userMap.get(firebaseUser.uid);
+                userMap.clear();
+                if (selfUser) userMap.set(selfUser.id, selfUser);
+                snapshot.docs.forEach((d) => {
+                  const friendUser = d.data() as User;
+                  userMap.set(friendUser.id, friendUser);
+                });
+                syncUsers();
+              }
+            )
           );
           unsubs.push(
             onSnapshot(
@@ -271,16 +293,12 @@ export const useAppStore = create<AppState>()(
           );
           unsubs.push(
             onSnapshot(
-              query(
-                collection(firestore, 'notifications'),
-                where('audienceUserIds', 'array-contains', firebaseUser.uid),
-                orderBy('createdAt', 'desc')
-              ),
+              query(collection(firestore, 'notifications'), where('audienceUserIds', 'array-contains', firebaseUser.uid)),
               (snapshot) => {
-                const notifications = snapshot.docs.map((d) => ({
+                const notifications = sortByCreatedAtDesc(snapshot.docs.map((d) => ({
                   id: d.id,
                   ...(d.data() as Omit<Notification, 'id'>),
-                }));
+                })));
                 set({ notifications });
               }
             )

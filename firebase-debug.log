@@ -1,0 +1,58 @@
+[debug] [2026-02-18T17:51:46.806Z] ----------------------------------------------------------------------
+[debug] [2026-02-18T17:51:46.810Z] Command:       C:\Program Files\nodejs\node.exe C:\Users\hp\AppData\Roaming\npm\node_modules\firebase-tools\lib\bin\firebase.js deploy --only firestore:indexes --debug
+[debug] [2026-02-18T17:51:46.811Z] CLI Version:   15.6.0
+[debug] [2026-02-18T17:51:46.811Z] Platform:      win32
+[debug] [2026-02-18T17:51:46.811Z] Node Version:  v20.8.1
+[debug] [2026-02-18T17:51:46.811Z] Time:          Wed Feb 18 2026 23:21:46 GMT+0530 (India Standard Time)
+[debug] [2026-02-18T17:51:46.812Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-02-18T17:51:50.203Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-02-18T17:51:50.205Z] > authorizing via signed-in user (varugheseezek@gmail.com)
+[debug] [2026-02-18T17:51:50.206Z] [iam] checking project svern-d0592 for permissions ["datastore.indexes.create","datastore.indexes.delete","datastore.indexes.list","datastore.indexes.update","firebase.projects.get"]
+[debug] [2026-02-18T17:51:50.209Z] Checked if tokens are valid: true, expires at: 1771440132999
+[debug] [2026-02-18T17:51:50.210Z] Checked if tokens are valid: true, expires at: 1771440132999
+[debug] [2026-02-18T17:51:50.218Z] >>> [apiv2][query] POST https://cloudresourcemanager.googleapis.com/v1/projects/svern-d0592:testIamPermissions [none]
+[debug] [2026-02-18T17:51:50.219Z] >>> [apiv2][(partial)header] POST https://cloudresourcemanager.googleapis.com/v1/projects/svern-d0592:testIamPermissions  x-goog-user-project=svern-d0592
+[debug] [2026-02-18T17:51:50.219Z] >>> [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/svern-d0592:testIamPermissions {"permissions":["datastore.indexes.create","datastore.indexes.delete","datastore.indexes.list","datastore.indexes.update","firebase.projects.get"]}
+[debug] [2026-02-18T17:51:50.449Z] *** [apiv2] error from fetch(https://cloudresourcemanager.googleapis.com/v1/projects/svern-d0592:testIamPermissions, {"headers":{},"method":"POST","body":"{\"permissions\":[\"datastore.indexes.create\",\"datastore.indexes.delete\",\"datastore.indexes.list\",\"datastore.indexes.update\",\"firebase.projects.get\"]}"}): FetchError: request to https://cloudresourcemanager.googleapis.com/v1/projects/svern-d0592:testIamPermissions failed, reason: 
+[debug] [2026-02-18T17:51:50.452Z] [iam] error while checking permissions, command may fail: Failed to make request to https://cloudresourcemanager.googleapis.com/v1/projects/svern-d0592:testIamPermissions
+[info] 
+[info] === Deploying to 'svern-d0592'...
+[info] 
+[info] i  deploying firestore 
+[info] i  firestore: ensuring required API firestore.googleapis.com is enabled... 
+[info] i  firestore: ensuring required API firestore.googleapis.com is enabled... 
+[debug] [2026-02-18T17:51:50.465Z] Checked if tokens are valid: true, expires at: 1771440132999
+[debug] [2026-02-18T17:51:50.466Z] Checked if tokens are valid: true, expires at: 1771440132999
+[debug] [2026-02-18T17:51:50.466Z] >>> [apiv2][query] GET https://firestore.googleapis.com/v1/projects/svern-d0592/databases/(default) [none]
+[debug] [2026-02-18T17:51:50.479Z] *** [apiv2] error from fetch(https://firestore.googleapis.com/v1/projects/svern-d0592/databases/(default), {"headers":{},"method":"GET"}): FetchError: request to https://firestore.googleapis.com/v1/projects/svern-d0592/databases/(default) failed, reason: connect EACCES 142.250.206.10:443
+[info] i  firestore: reading indexes from firestore.indexes.json... 
+[info] i  cloud.firestore: checking firestore.rules for compilation errors... 
+[debug] [2026-02-18T17:51:50.503Z] Checked if tokens are valid: true, expires at: 1771440132999
+[debug] [2026-02-18T17:51:50.503Z] Checked if tokens are valid: true, expires at: 1771440132999
+[debug] [2026-02-18T17:51:50.504Z] >>> [apiv2][query] POST https://firebaserules.googleapis.com/v1/projects/svern-d0592:test [none]
+[debug] [2026-02-18T17:51:50.504Z] >>> [apiv2][body] POST https://firebaserules.googleapis.com/v1/projects/svern-d0592:test [omitted]
+[debug] [2026-02-18T17:51:50.524Z] *** [apiv2] error from fetch(https://firebaserules.googleapis.com/v1/projects/svern-d0592:test, {"headers":{},"method":"POST","body":"{\"source\":{\"files\":[{\"name\":\"firestore.rules\",\"content\":\"rules_version = '2';\\r\\nservice cloud.firestore {\\r\\n  match /databases/{database}/documents {\\r\\n    function signedIn() {\\r\\n      return request.auth != null;\\r\\n    }\\r\\n\\r\\n    function isSelf(userId) {\\n      return signedIn() && request.auth.uid == userId;\\n    }\\n\\n    function isFriendByDoc(docData) {\\n      return signedIn() && request.auth.uid in docData.friendIds;\\n    }\\n\\r\\n    function boxExists(boxId) {\\r\\n      return exists(/databases/$(database)/documents/boxes/$(boxId));\\r\\n    }\\r\\n\\r\\n    function isParticipantByBoxId(boxId) {\\r\\n      return signedIn()\\r\\n        && boxExists(boxId)\\r\\n        && request.auth.uid in get(/databases/$(database)/documents/boxes/$(boxId)).data.participantIds;\\r\\n    }\\r\\n\\r\\n    function isBoxParticipant(boxData) {\\r\\n      return signedIn() && request.auth.uid in boxData.participantIds;\\r\\n    }\\r\\n\\r\\n    match /users/{userId} {\\n      allow get: if isSelf(userId) || isFriendByDoc(resource.data);\\n      allow list: if signedIn()\\n        && (\\n          isFriendByDoc(resource.data)\\n          || (request.query.limit != null && request.query.limit <= 1)\\n        );\\n      allow create: if isSelf(userId)\\n        && request.resource.data.id == userId\\n        && request.resource.data.email is string\\n        && request.resource.data.name is string\\n        && request.resource.data.friendIds is list;\\n      allow update, delete: if isSelf(userId);\\r\\n    }\\r\\n\\r\\n    match /boxes/{boxId} {\\r\\n      allow read: if isBoxParticipant(resource.data);\\r\\n      allow create: if isBoxParticipant(request.resource.data)\\r\\n        && request.resource.data.name is string\\r\\n        && request.resource.data.participantIds is list\\r\\n        && request.resource.data.items is list;\\r\\n      allow update, delete: if isBoxParticipant(resource.data);\\r\\n    }\\r\\n\\r\\n    match /messages/{messageId} {\\r\\n      allow read: if isParticipantByBoxId(resource.data.boxId);\\r\\n      allow create: if signedIn()\\r\\n        && request.resource.data.senderUserId == request.auth.uid\\r\\n        && request.resource.data.boxId is string\\r\\n        && request.resource.data.text is string\\r\\n        && request.resource.data.createdAt is string\\r\\n        && isParticipantByBoxId(request.resource.data.boxId);\\r\\n      allow update, delete: if false;\\r\\n    }\\r\\n\\r\\n    match /notifications/{notificationId} {\\r\\n      allow read: if signedIn() && request.auth.uid in resource.data.audienceUserIds;\\r\\n      allow create: if signedIn()\\r\\n        && request.resource.data.actorUserId == request.auth.uid\\r\\n        && request.auth.uid in request.resource.data.audienceUserIds\\r\\n        && request.resource.data.audienceUserIds is list\\r\\n        && request.resource.data.message is string\\r\\n        && request.resource.data.type is string\\r\\n        && request.resource.data.createdAt is string\\r\\n        && request.resource.data.seenBy is list\\r\\n        && (\\r\\n          !('boxId' in request.resource.data)\\r\\n          || isParticipantByBoxId(request.resource.data.boxId)\\r\\n        );\\r\\n      allow update: if signedIn() && request.auth.uid in resource.data.audienceUserIds;\\r\\n      allow delete: if false;\\r\\n    }\\r\\n  }\\r\\n}\\r\\n\"}]}}"}): FetchError: request to https://firebaserules.googleapis.com/v1/projects/svern-d0592:test failed, reason: 
+[debug] [2026-02-18T17:51:50.528Z] FetchError: request to https://firebaserules.googleapis.com/v1/projects/svern-d0592:test failed, reason: 
+    at ClientRequest.<anonymous> (C:\Users\hp\AppData\Roaming\npm\node_modules\firebase-tools\node_modules\node-fetch\lib\index.js:1501:11)
+    at ClientRequest.emit (node:events:514:28)
+    at TLSSocket.socketErrorListener (node:_http_client:495:9)
+    at TLSSocket.emit (node:events:514:28)
+    at emitErrorNT (node:internal/streams/destroy:151:8)
+    at emitErrorCloseNT (node:internal/streams/destroy:116:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:82:21)
+[error] 
+[error] Error: Failed to make request to https://firebaserules.googleapis.com/v1/projects/svern-d0592:test
+[debug] [2026-02-18T17:51:51.202Z] Error: EPERM: operation not permitted, open 'C:\Users\hp\.config\configstore\firebase-tools.json.1308949531'
+    at Object.open (node:internal/fs/sync:78:18)
+    at Object.openSync (node:fs:565:17)
+    at Function.writeFileSync [as sync] (C:\Users\hp\AppData\Roaming\npm\node_modules\firebase-tools\node_modules\write-file-atomic\index.js:205:13)
+    at set all [as all] (C:\Users\hp\AppData\Roaming\npm\node_modules\firebase-tools\node_modules\configstore\index.js:61:20)
+    at Configstore.delete (C:\Users\hp\AppData\Roaming\npm\node_modules\firebase-tools\node_modules\configstore\index.js:101:12)
+    at process.<anonymous> (C:\Users\hp\AppData\Roaming\npm\node_modules\firebase-tools\lib\bin\cli.js:65:45)
+    at process.emit (node:events:526:35)
+    at process.exit (node:internal/process/per_thread:193:15)
+    at Timeout._onTimeout (C:\Users\hp\AppData\Roaming\npm\node_modules\firebase-tools\lib\errorOut.js:20:17)
+    at listOnTimeout (node:internal/timers:573:17)
+[error] 
+[error] Error: An unexpected error has occurred.
