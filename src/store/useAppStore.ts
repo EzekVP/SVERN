@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { FirebaseError } from 'firebase/app';
 import {
+  arrayRemove,
   arrayUnion,
   collection,
   doc,
@@ -19,6 +20,7 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import {
   createUserWithEmailAndPassword,
+  deleteUser,
   GoogleAuthProvider,
   onAuthStateChanged,
   signInWithCredential,
@@ -55,10 +57,13 @@ type AppState = {
   signIn: (email: string, password: string) => Promise<Result>;
   signInWithGoogle: (idToken: string) => Promise<Result>;
   logout: () => Promise<void>;
+  deleteAccount: () => Promise<Result>;
   navigate: (route: RouteState) => void;
   selectBox: (boxId: string) => void;
   addFriendByEmail: (email: string) => Promise<Result>;
   acceptFriendRequest: (notificationId: string) => Promise<Result>;
+  rejectFriendRequest: (notificationId: string) => Promise<Result>;
+  cancelFriendRequest: (notificationId: string) => Promise<Result>;
   addBox: (name: string, participantIds: string[]) => Promise<Result>;
   addItem: (boxId: string, label: string, ownerUserId: string) => Promise<Result>;
   raiseConcern: (boxId: string, itemId: string) => Promise<void>;
@@ -358,7 +363,16 @@ export const useAppStore = create<AppState>()(
           return { ok: true };
         } catch (error) {
           if (error instanceof FirebaseError && error.code === 'auth/email-already-in-use') {
-            return { ok: false, error: 'An account with this email already exists.' };
+            try {
+              await signInWithEmailAndPassword(auth, cleanEmail, password);
+              return { ok: true };
+            } catch {
+              return {
+                ok: false,
+                error:
+                  'This email already exists in Firebase Authentication. Use Sign in, reset the password, or delete the user from Firebase Authentication.',
+              };
+            }
           }
           return { ok: false, error: formatFirebaseError(error, 'Sign up failed') };
         }
@@ -415,6 +429,125 @@ export const useAppStore = create<AppState>()(
           await signOut(auth);
         } else {
           set({ currentUserId: undefined, route: { name: 'home' } });
+        }
+      },
+
+      deleteAccount: async () => {
+        const currentUserId = get().currentUserId;
+        if (!currentUserId) return { ok: false, error: 'Please log in first.' };
+
+        if (!hasConfig || !auth || !db) {
+          set((state) => ({
+            users: state.users.filter((u) => u.id !== currentUserId).map((u) => ({
+              ...u,
+              friendIds: u.friendIds.filter((idValue) => idValue !== currentUserId),
+            })),
+            boxes: state.boxes
+              .map((b) => ({
+                ...b,
+                participantIds: b.participantIds.filter((idValue) => idValue !== currentUserId),
+                items: b.items.filter((it) => it.ownerUserId !== currentUserId && it.addedByUserId !== currentUserId),
+              }))
+              .filter((b) => b.participantIds.length > 0),
+            messages: state.messages.filter((m) => m.senderUserId !== currentUserId),
+            notifications: state.notifications.filter(
+              (n) => n.actorUserId !== currentUserId && !n.audienceUserIds.includes(currentUserId)
+            ),
+            currentUserId: undefined,
+            selectedBoxId: undefined,
+            route: { name: 'home' },
+          }));
+          get().showToast('Account deleted.', 'success');
+          return { ok: true };
+        }
+
+        const firestore = db;
+        const authUser = auth.currentUser;
+        if (!firestore || !authUser || authUser.uid !== currentUserId) {
+          return { ok: false, error: 'Session mismatch. Please sign in again.' };
+        }
+        const lastSignInMs = authUser.metadata.lastSignInTime
+          ? new Date(authUser.metadata.lastSignInTime).getTime()
+          : 0;
+        if (!lastSignInMs || Date.now() - lastSignInMs > 4 * 60 * 1000) {
+          const message = 'For security, sign in again and then retry account deletion.';
+          get().showToast(message, 'error');
+          return { ok: false, error: message };
+        }
+
+        const previousUsers = get().users;
+        const previousBoxes = get().boxes;
+        const previousMessages = get().messages;
+        const previousNotifications = get().notifications;
+
+        try {
+          const friendDocs = await getDocs(
+            query(collection(firestore, 'users'), where('friendIds', 'array-contains', currentUserId))
+          );
+          const boxDocs = await getDocs(
+            query(collection(firestore, 'boxes'), where('participantIds', 'array-contains', currentUserId))
+          );
+
+          await withRetry(async () => {
+            const batch = writeBatch(firestore);
+
+            friendDocs.docs.forEach((d) => {
+              batch.update(doc(firestore, 'users', d.id), {
+                friendIds: arrayRemove(currentUserId),
+              });
+            });
+
+            boxDocs.docs.forEach((d) => {
+              const box = d.data() as Omit<CommonBox, 'id'>;
+              const participantIds = (box.participantIds || []).filter((idValue) => idValue !== currentUserId);
+              const items = (box.items || []).filter(
+                (it) => it.ownerUserId !== currentUserId && it.addedByUserId !== currentUserId
+              );
+              if (participantIds.length === 0) {
+                batch.delete(doc(firestore, 'boxes', d.id));
+              } else {
+                batch.update(doc(firestore, 'boxes', d.id), {
+                  participantIds,
+                  items,
+                });
+              }
+            });
+
+            batch.delete(doc(firestore, 'users', currentUserId));
+            await batch.commit();
+          });
+
+          await deleteUser(authUser);
+          set({
+            users: previousUsers.filter((u) => u.id !== currentUserId).map((u) => ({
+              ...u,
+              friendIds: u.friendIds.filter((idValue) => idValue !== currentUserId),
+            })),
+            boxes: previousBoxes
+              .map((b) => ({
+                ...b,
+                participantIds: b.participantIds.filter((idValue) => idValue !== currentUserId),
+                items: b.items.filter((it) => it.ownerUserId !== currentUserId && it.addedByUserId !== currentUserId),
+              }))
+              .filter((b) => b.participantIds.length > 0),
+            messages: previousMessages.filter((m) => m.senderUserId !== currentUserId),
+            notifications: previousNotifications.filter(
+              (n) => n.actorUserId !== currentUserId && !n.audienceUserIds.includes(currentUserId)
+            ),
+            currentUserId: undefined,
+            selectedBoxId: undefined,
+            route: { name: 'home' },
+          });
+          get().showToast('Account deleted.', 'success');
+          return { ok: true };
+        } catch (error) {
+          const isRecentLoginError =
+            error instanceof FirebaseError && error.code === 'auth/requires-recent-login';
+          const message = isRecentLoginError
+            ? 'Please sign in again, then delete account.'
+            : formatFirebaseError(error, 'Failed to delete account');
+          get().showToast(message, 'error');
+          return { ok: false, error: message };
         }
       },
 
@@ -514,28 +647,52 @@ export const useAppStore = create<AppState>()(
 
       acceptFriendRequest: async (notificationId) => {
         const currentUserId = get().currentUserId;
-        if (!currentUserId) return { ok: false, error: 'Please log in first.' };
+        if (!currentUserId) {
+          get().showToast('Please log in first.', 'error');
+          return { ok: false, error: 'Please log in first.' };
+        }
 
         const request = get().notifications.find((n) => n.id === notificationId);
         if (!request || request.type !== 'friend_request' || request.closedAt) {
+          get().showToast('Friend request not found.', 'error');
           return { ok: false, error: 'Friend request not found.' };
         }
+        if (request.actorUserId === currentUserId) {
+          get().showToast('You cannot accept your own request.', 'error');
+          return { ok: false, error: 'You cannot accept your own request.' };
+        }
         if (!request.audienceUserIds.includes(currentUserId)) {
+          get().showToast('You cannot accept this request.', 'error');
           return { ok: false, error: 'You cannot accept this request.' };
         }
 
-        const requester = get().users.find((u) => u.id === request.actorUserId);
+        const requesterId = request.actorUserId;
         const accepter = get().users.find((u) => u.id === currentUserId);
-        if (!requester || !accepter) return { ok: false, error: 'User not found.' };
-        if (accepter.friendIds.includes(requester.id)) return { ok: false, error: 'Already friends.' };
+        if (!accepter) {
+          get().showToast('Current user not found.', 'error');
+          return { ok: false, error: 'Current user not found.' };
+        }
+        if (accepter.friendIds.includes(requesterId)) {
+          get().showToast('Already friends.', 'info');
+          return { ok: false, error: 'Already friends.' };
+        }
 
         const closedAt = nowIso();
+        const requestIdsToClose = get()
+          .notifications.filter(
+            (n) =>
+              n.type === 'friend_request' &&
+              !n.closedAt &&
+              ((n.actorUserId === requesterId && n.audienceUserIds.includes(accepter.id)) ||
+                (n.actorUserId === accepter.id && n.audienceUserIds.includes(requesterId)))
+          )
+          .map((n) => n.id);
         const acceptanceId = id();
         const acceptance: Notification = {
           id: acceptanceId,
-          audienceUserIds: [requester.id, accepter.id],
+          audienceUserIds: [requesterId, accepter.id],
           actorUserId: currentUserId,
-          message: `${accepter.name} accepted ${requester.name}'s friend request.`,
+          message: `${accepter.name} accepted your friend request.`,
           type: 'friend_added',
           createdAt: closedAt,
           seenBy: [currentUserId],
@@ -546,14 +703,17 @@ export const useAppStore = create<AppState>()(
 
         set((state) => ({
           users: state.users.map((u) => {
-            if (u.id === requester.id) return { ...u, friendIds: [...u.friendIds, accepter.id] };
-            if (u.id === accepter.id) return { ...u, friendIds: [...u.friendIds, requester.id] };
+            if (u.id === requesterId) return { ...u, friendIds: Array.from(new Set([...u.friendIds, accepter.id])) };
+            if (u.id === accepter.id) return { ...u, friendIds: Array.from(new Set([...u.friendIds, requesterId])) };
             return u;
           }),
           notifications: [
-            { ...request, closedAt, seenBy: Array.from(new Set([...request.seenBy, currentUserId])) },
             acceptance,
-            ...state.notifications.filter((n) => n.id !== request.id),
+            ...state.notifications.map((n) =>
+              requestIdsToClose.includes(n.id)
+                ? { ...n, closedAt, seenBy: Array.from(new Set([...n.seenBy, currentUserId])) }
+                : n
+            ),
           ],
         }));
 
@@ -567,11 +727,13 @@ export const useAppStore = create<AppState>()(
         try {
           await withRetry(async () => {
             const batch = writeBatch(firestore);
-            batch.update(doc(firestore, 'users', requester.id), { friendIds: arrayUnion(accepter.id) });
-            batch.update(doc(firestore, 'users', accepter.id), { friendIds: arrayUnion(requester.id) });
-            batch.update(doc(firestore, 'notifications', request.id), {
-              closedAt,
-              seenBy: arrayUnion(currentUserId),
+            batch.update(doc(firestore, 'users', requesterId), { friendIds: arrayUnion(accepter.id) });
+            batch.update(doc(firestore, 'users', accepter.id), { friendIds: arrayUnion(requesterId) });
+            requestIdsToClose.forEach((requestId) => {
+              batch.update(doc(firestore, 'notifications', requestId), {
+                closedAt,
+                seenBy: arrayUnion(currentUserId),
+              });
             });
             batch.set(doc(firestore, 'notifications', acceptanceId), {
               audienceUserIds: acceptance.audienceUserIds,
@@ -585,10 +747,103 @@ export const useAppStore = create<AppState>()(
           });
           get().showToast('Friend request accepted.', 'success');
           return { ok: true };
-        } catch {
+        } catch (error) {
           set({ users: previousUsers, notifications: previousNotifications });
-          get().showToast('Failed to accept friend request. Please retry.', 'error');
-          return { ok: false, error: 'Failed to accept friend request. Please retry.' };
+          const isPermissionError = error instanceof FirebaseError && error.code === 'permission-denied';
+          const message = isPermissionError
+            ? 'Accept failed: Firestore rules are blocking friend updates. Deploy latest firestore.rules.'
+            : formatFirebaseError(error, 'Failed to accept friend request. Please retry.');
+          get().showToast(message, 'error');
+          return { ok: false, error: message };
+        }
+      },
+
+      rejectFriendRequest: async (notificationId) => {
+        const currentUserId = get().currentUserId;
+        if (!currentUserId) return { ok: false, error: 'Please log in first.' };
+
+        const request = get().notifications.find((n) => n.id === notificationId);
+        if (!request || request.type !== 'friend_request' || request.closedAt) {
+          return { ok: false, error: 'Friend request not found.' };
+        }
+        if (request.actorUserId === currentUserId) {
+          return { ok: false, error: 'Use cancel for your own request.' };
+        }
+        if (!request.audienceUserIds.includes(currentUserId)) {
+          return { ok: false, error: 'You cannot reject this request.' };
+        }
+
+        const closedAt = nowIso();
+        const previousNotifications = get().notifications;
+        set((state) => ({
+          notifications: state.notifications.map((n) =>
+            n.id === request.id ? { ...n, closedAt, seenBy: Array.from(new Set([...n.seenBy, currentUserId])) } : n
+          ),
+        }));
+
+        if (!hasConfig || !db) {
+          get().showToast('Friend request rejected.', 'success');
+          return { ok: true };
+        }
+
+        const firestore = db;
+        if (!firestore) return { ok: false, error: 'Firebase DB unavailable.' };
+        try {
+          await withRetry(() =>
+            updateDoc(doc(firestore, 'notifications', request.id), {
+              closedAt,
+              seenBy: arrayUnion(currentUserId),
+            })
+          );
+          get().showToast('Friend request rejected.', 'success');
+          return { ok: true };
+        } catch {
+          set({ notifications: previousNotifications });
+          get().showToast('Failed to reject friend request. Please retry.', 'error');
+          return { ok: false, error: 'Failed to reject friend request. Please retry.' };
+        }
+      },
+
+      cancelFriendRequest: async (notificationId) => {
+        const currentUserId = get().currentUserId;
+        if (!currentUserId) return { ok: false, error: 'Please log in first.' };
+
+        const request = get().notifications.find((n) => n.id === notificationId);
+        if (!request || request.type !== 'friend_request' || request.closedAt) {
+          return { ok: false, error: 'Friend request not found.' };
+        }
+        if (request.actorUserId !== currentUserId) {
+          return { ok: false, error: 'You can only cancel your own request.' };
+        }
+
+        const closedAt = nowIso();
+        const previousNotifications = get().notifications;
+        set((state) => ({
+          notifications: state.notifications.map((n) =>
+            n.id === request.id ? { ...n, closedAt, seenBy: Array.from(new Set([...n.seenBy, currentUserId])) } : n
+          ),
+        }));
+
+        if (!hasConfig || !db) {
+          get().showToast('Friend request canceled.', 'success');
+          return { ok: true };
+        }
+
+        const firestore = db;
+        if (!firestore) return { ok: false, error: 'Firebase DB unavailable.' };
+        try {
+          await withRetry(() =>
+            updateDoc(doc(firestore, 'notifications', request.id), {
+              closedAt,
+              seenBy: arrayUnion(currentUserId),
+            })
+          );
+          get().showToast('Friend request canceled.', 'success');
+          return { ok: true };
+        } catch {
+          set({ notifications: previousNotifications });
+          get().showToast('Failed to cancel friend request. Please retry.', 'error');
+          return { ok: false, error: 'Failed to cancel friend request. Please retry.' };
         }
       },
 
@@ -636,30 +891,37 @@ export const useAppStore = create<AppState>()(
           route: { name: 'home', boxId },
         }));
         try {
-          await withRetry(async () => {
-            const batch = writeBatch(firestore);
-            batch.set(doc(firestore, 'boxes', boxId), {
+          await withRetry(() =>
+            setDoc(doc(firestore, 'boxes', boxId), {
               name: cleanName,
               participantIds: allParticipants,
               items: [],
-            });
-            batch.set(doc(firestore, 'notifications', notificationId), {
-              boxId,
-              audienceUserIds: boxCreatedNotification.audienceUserIds,
-              actorUserId: boxCreatedNotification.actorUserId,
-              message: boxCreatedNotification.message,
-              type: boxCreatedNotification.type,
-              createdAt: boxCreatedNotification.createdAt,
-              seenBy: boxCreatedNotification.seenBy,
-            });
-            await batch.commit();
-          });
+            })
+          );
+          try {
+            await withRetry(() =>
+              setDoc(doc(firestore, 'notifications', notificationId), {
+                boxId,
+                audienceUserIds: boxCreatedNotification.audienceUserIds,
+                actorUserId: boxCreatedNotification.actorUserId,
+                message: boxCreatedNotification.message,
+                type: boxCreatedNotification.type,
+                createdAt: boxCreatedNotification.createdAt,
+                seenBy: boxCreatedNotification.seenBy,
+              })
+            );
+          } catch {
+            set((state) => ({
+              notifications: state.notifications.filter((n) => n.id !== notificationId),
+            }));
+          }
           get().showToast('CommonBox created.', 'success');
           return { ok: true };
-        } catch {
+        } catch (error) {
           set({ boxes: previousBoxes, notifications: previousNotifications });
-          get().showToast('Failed to create box. Please retry.', 'error');
-          return { ok: false, error: 'Failed to create box. Please retry.' };
+          const message = formatFirebaseError(error, 'Failed to create box. Please retry.');
+          get().showToast(message, 'error');
+          return { ok: false, error: message };
         }
       },
 
