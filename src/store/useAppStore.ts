@@ -4,6 +4,7 @@ import {
   arrayRemove,
   arrayUnion,
   collection,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -466,14 +467,6 @@ export const useAppStore = create<AppState>()(
         if (!firestore || !authUser || authUser.uid !== currentUserId) {
           return { ok: false, error: 'Session mismatch. Please sign in again.' };
         }
-        const lastSignInMs = authUser.metadata.lastSignInTime
-          ? new Date(authUser.metadata.lastSignInTime).getTime()
-          : 0;
-        if (!lastSignInMs || Date.now() - lastSignInMs > 4 * 60 * 1000) {
-          const message = 'For security, sign in again and then retry account deletion.';
-          get().showToast(message, 'error');
-          return { ok: false, error: message };
-        }
 
         const previousUsers = get().users;
         const previousBoxes = get().boxes;
@@ -481,43 +474,51 @@ export const useAppStore = create<AppState>()(
         const previousNotifications = get().notifications;
 
         try {
-          const friendDocs = await getDocs(
-            query(collection(firestore, 'users'), where('friendIds', 'array-contains', currentUserId))
-          );
-          const boxDocs = await getDocs(
-            query(collection(firestore, 'boxes'), where('participantIds', 'array-contains', currentUserId))
-          );
+          // Best-effort cleanup: failure here should not block core account deletion.
+          try {
+            const friendDocs = await getDocs(
+              query(collection(firestore, 'users'), where('friendIds', 'array-contains', currentUserId))
+            );
+            await Promise.all(
+              friendDocs.docs.map((d) =>
+                withRetry(() =>
+                  updateDoc(doc(firestore, 'users', d.id), {
+                    friendIds: arrayRemove(currentUserId),
+                  })
+                )
+              )
+            );
+          } catch {}
 
-          await withRetry(async () => {
-            const batch = writeBatch(firestore);
-
-            friendDocs.docs.forEach((d) => {
-              batch.update(doc(firestore, 'users', d.id), {
-                friendIds: arrayRemove(currentUserId),
+          try {
+            const boxDocs = await getDocs(
+              query(collection(firestore, 'boxes'), where('participantIds', 'array-contains', currentUserId))
+            );
+            await withRetry(async () => {
+              const batch = writeBatch(firestore);
+              boxDocs.docs.forEach((d) => {
+                const box = d.data() as Omit<CommonBox, 'id'>;
+                const participantIds = (box.participantIds || []).filter((idValue) => idValue !== currentUserId);
+                const items = (box.items || []).filter(
+                  (it) => it.ownerUserId !== currentUserId && it.addedByUserId !== currentUserId
+                );
+                if (participantIds.length === 0) {
+                  batch.delete(doc(firestore, 'boxes', d.id));
+                } else {
+                  batch.update(doc(firestore, 'boxes', d.id), {
+                    participantIds,
+                    items,
+                  });
+                }
               });
+              await batch.commit();
             });
+          } catch {}
 
-            boxDocs.docs.forEach((d) => {
-              const box = d.data() as Omit<CommonBox, 'id'>;
-              const participantIds = (box.participantIds || []).filter((idValue) => idValue !== currentUserId);
-              const items = (box.items || []).filter(
-                (it) => it.ownerUserId !== currentUserId && it.addedByUserId !== currentUserId
-              );
-              if (participantIds.length === 0) {
-                batch.delete(doc(firestore, 'boxes', d.id));
-              } else {
-                batch.update(doc(firestore, 'boxes', d.id), {
-                  participantIds,
-                  items,
-                });
-              }
-            });
+          await withRetry(() => deleteDoc(doc(firestore, 'users', currentUserId)));
+          await withRetry(() => deleteUser(authUser));
 
-            batch.delete(doc(firestore, 'users', currentUserId));
-            await batch.commit();
-          });
-
-          await deleteUser(authUser);
+          get().stopRealtimeSync();
           set({
             users: previousUsers.filter((u) => u.id !== currentUserId).map((u) => ({
               ...u,
@@ -544,7 +545,7 @@ export const useAppStore = create<AppState>()(
           const isRecentLoginError =
             error instanceof FirebaseError && error.code === 'auth/requires-recent-login';
           const message = isRecentLoginError
-            ? 'Please sign in again, then delete account.'
+            ? 'Please sign out, sign in again, and then delete account.'
             : formatFirebaseError(error, 'Failed to delete account');
           get().showToast(message, 'error');
           return { ok: false, error: message };
