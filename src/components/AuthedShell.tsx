@@ -8,6 +8,7 @@ import { Drawer } from './Drawer';
 import { HomeScreen } from '../screens/HomeScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
 import { FriendsScreen } from '../screens/FriendsScreen';
+import { AlertsScreen } from '../screens/AlertsScreen';
 import { NotificationsScreen } from '../screens/NotificationsScreen';
 import { ChatScreen } from '../screens/ChatScreen';
 
@@ -41,15 +42,27 @@ export function AuthedShell({ colors }: Props) {
   const me = users.find((u) => u.id === currentUserId);
   const myBoxes = boxes.filter((b) => currentUserId && b.participantIds.includes(currentUserId));
 
-  const unseenCount = useMemo(() => {
+  const openAlertsCount = useMemo(() => {
     if (!currentUserId) return 0;
-    return notifications.filter((n) => !n.seenBy.includes(currentUserId)).length;
-  }, [currentUserId, notifications]);
+    return notifications.filter((n) => {
+      if (n.closedAt) return false;
+      if (!n.audienceUserIds.includes(currentUserId)) return false;
+      if (n.type === 'friend_request') return n.actorUserId !== currentUserId;
+      if (n.type === 'chat_mention') return true;
+      if (n.type === 'ownership_concern') {
+        if (!n.boxId || !n.itemId) return false;
+        const box = boxes.find((b) => b.id === n.boxId);
+        const item = box?.items.find((i) => i.id === n.itemId);
+        return Boolean(box && item && item.hasConcern);
+      }
+      return false;
+    }).length;
+  }, [boxes, currentUserId, notifications]);
 
   const drawerWidth = Math.min(Math.max(width * 0.72, 250), 360);
 
   useEffect(() => {
-    if (route.name === 'notifications') {
+    if (route.name === 'notifications' || route.name === 'alerts') {
       notifications.forEach((n) => markNotificationSeen(n.id));
     }
   }, [markNotificationSeen, notifications, route.name]);
@@ -61,9 +74,9 @@ export function AuthedShell({ colors }: Props) {
           <Text style={[styles.iconButtonText, { color: colors.text }]}>Menu</Text>
         </Pressable>
         <Text style={[styles.topBarTitle, { color: colors.text }]}>{routeTitle(route.name)}</Text>
-        <Pressable onPress={() => navigate({ name: 'notifications' })} style={[styles.iconButton, { borderColor: colors.border }]}>
+        <Pressable onPress={() => navigate({ name: 'alerts' })} style={[styles.iconButton, { borderColor: colors.border }]}>
           <Text style={[styles.iconButtonText, { color: colors.text }]}>
-            Alerts {unseenCount > 0 ? `(${unseenCount})` : ''}
+            Alerts {openAlertsCount > 0 ? `(${openAlertsCount})` : ''}
           </Text>
         </Pressable>
       </View>
@@ -72,6 +85,7 @@ export function AuthedShell({ colors }: Props) {
         {route.name === 'home' && me ? <HomeScreen colors={colors} me={me} myBoxes={myBoxes} selectedBoxId={selectedBoxId} /> : null}
         {route.name === 'profile' && me ? <ProfileScreen colors={colors} me={me} /> : null}
         {route.name === 'friends' && me ? <FriendsScreen colors={colors} me={me} /> : null}
+        {route.name === 'alerts' && me ? <AlertsScreen colors={colors} me={me} /> : null}
         {route.name === 'notifications' && me ? <NotificationsScreen colors={colors} me={me} /> : null}
         {route.name === 'chat' && me ? <ChatScreen colors={colors} me={me} boxId={route.boxId || selectedBoxId} /> : null}
       </View>

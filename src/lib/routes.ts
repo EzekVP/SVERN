@@ -4,6 +4,7 @@ export const routeTitle = (name: RouteName) => {
   if (name === 'home') return 'CommonBox';
   if (name === 'profile') return 'Profile';
   if (name === 'friends') return 'Friends';
+  if (name === 'alerts') return 'Alerts';
   if (name === 'notifications') return 'Notifications';
   return 'Chat Room';
 };

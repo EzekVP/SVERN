@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import { styles } from '../styles';
 import { ThemeColors } from '../theme';
@@ -10,8 +11,9 @@ type Props = {
 };
 
 export function ProfileScreen({ colors, me }: Props) {
-  const boxes = useAppStore((s) => s.boxes.filter((b) => b.participantIds.includes(me.id)));
-  const ownedCount = boxes.reduce((count, b) => count + b.items.filter((i) => i.ownerUserId === me.id).length, 0);
+  const boxes = useAppStore((s) => s.boxes);
+  const myBoxes = useMemo(() => boxes.filter((b) => b.participantIds.includes(me.id)), [boxes, me.id]);
+  const ownedCount = myBoxes.reduce((count, b) => count + b.items.filter((i) => i.ownerUserId === me.id).length, 0);
 
   return (
     <ScrollView contentContainerStyle={styles.page}>
@@ -22,7 +24,7 @@ export function ProfileScreen({ colors, me }: Props) {
         <View style={[styles.metricGrid, { marginTop: 14 }]}>
           <View style={[styles.metricCard, { borderColor: colors.border, backgroundColor: colors.background }]}>
             <Text style={{ color: colors.muted }}>Boxes</Text>
-            <Text style={[styles.metricValue, { color: colors.text }]}>{boxes.length}</Text>
+            <Text style={[styles.metricValue, { color: colors.text }]}>{myBoxes.length}</Text>
           </View>
           <View style={[styles.metricCard, { borderColor: colors.border, backgroundColor: colors.background }]}>
             <Text style={{ color: colors.muted }}>Owned Items</Text>

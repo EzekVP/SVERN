@@ -2,7 +2,7 @@ import { Animated, Modal, Pressable, Text, TextInput, View } from 'react-native'
 import { styles } from '../styles';
 import { ThemeColors } from '../theme';
 import { useAppStore } from '../store/useAppStore';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { navigateAndClose } from '../lib/routes';
 
 type Props = {
@@ -19,14 +19,15 @@ export function Drawer({ colors, drawerWidth, drawerAnim, isOpen, onClose }: Pro
   const themeMode = useAppStore((s) => s.themeMode);
   const logout = useAppStore((s) => s.logout);
   const addBox = useAppStore((s) => s.addBox);
-  const me = useAppStore((s) => s.users.find((u) => u.id === s.currentUserId));
+  const currentUserId = useAppStore((s) => s.currentUserId);
   const users = useAppStore((s) => s.users);
 
   const [newBoxName, setNewBoxName] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
   const [selectedParticipants, setSelectedParticipants] = useState<string[]>([]);
 
-  const participantOptions = users.filter((u) => u.id !== me?.id);
+  const me = useMemo(() => users.find((u) => u.id === currentUserId), [currentUserId, users]);
+  const participantOptions = useMemo(() => users.filter((u) => u.id !== me?.id), [me?.id, users]);
 
   const translateX = drawerAnim.interpolate({
     inputRange: [0, 1],
@@ -73,6 +74,11 @@ export function Drawer({ colors, drawerWidth, drawerAnim, isOpen, onClose }: Pro
             <DrawerLink
               label="Friends"
               onPress={() => navigateAndClose(navigate, onClose, { name: 'friends' })}
+              colors={colors}
+            />
+            <DrawerLink
+              label="Alerts"
+              onPress={() => navigateAndClose(navigate, onClose, { name: 'alerts' })}
               colors={colors}
             />
             <DrawerLink
