@@ -19,6 +19,8 @@ export function AlertsScreen({ colors, me }: Props) {
   const users = useAppStore((s) => s.users);
   const claimOwnership = useAppStore((s) => s.claimOwnership);
   const acceptFriendRequest = useAppStore((s) => s.acceptFriendRequest);
+  const rejectFriendRequest = useAppStore((s) => s.rejectFriendRequest);
+  const cancelFriendRequest = useAppStore((s) => s.cancelFriendRequest);
   const navigate = useAppStore((s) => s.navigate);
   const [expanded, setExpanded] = useState({
     concerns: true,
@@ -116,12 +118,20 @@ export function AlertsScreen({ colors, me }: Props) {
                   <Text style={{ color: colors.muted, marginTop: 6 }}>
                     From {actor?.name || 'Unknown'} on {new Date(n.createdAt).toLocaleString()}
                   </Text>
-                  <Pressable
-                    onPress={() => acceptFriendRequest(n.id)}
-                    style={[styles.smallActionButton, { backgroundColor: colors.accent }]}
-                  >
-                    <Text style={styles.primaryButtonText}>Accept</Text>
-                  </Pressable>
+                  <View style={{ marginTop: 10, flexDirection: 'row', gap: 8 }}>
+                    <Pressable
+                      onPress={() => acceptFriendRequest(n.id)}
+                      style={[styles.smallActionButton, { marginTop: 0, backgroundColor: colors.accent }]}
+                    >
+                      <Text style={styles.primaryButtonText}>Accept</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => rejectFriendRequest(n.id)}
+                      style={[styles.smallActionButton, { marginTop: 0, borderWidth: 1, borderColor: colors.border }]}
+                    >
+                      <Text style={{ color: colors.text, fontWeight: '700' }}>Reject</Text>
+                    </Pressable>
+                  </View>
                 </View>
               );
             })}
@@ -151,6 +161,12 @@ export function AlertsScreen({ colors, me }: Props) {
                   <Text style={{ color: colors.muted, marginTop: 6 }}>
                     To {recipient?.name || 'Unknown'} on {new Date(n.createdAt).toLocaleString()}
                   </Text>
+                  <Pressable
+                    onPress={() => cancelFriendRequest(n.id)}
+                    style={[styles.smallActionButton, { borderWidth: 1, borderColor: colors.border }]}
+                  >
+                    <Text style={{ color: colors.text, fontWeight: '700' }}>Cancel</Text>
+                  </Pressable>
                 </View>
               );
             })}
