@@ -44,7 +44,7 @@ export function FriendsScreen({ colors, me }: Props) {
         {error ? <Text style={[styles.errorText, { color: colors.danger }]}>{error}</Text> : null}
 
         <Pressable style={[styles.primaryButton, { backgroundColor: colors.accent }]} onPress={addFriend}>
-          <Text style={styles.primaryButtonText}>Add Friend</Text>
+          <Text style={styles.primaryButtonText}>Send Request</Text>
         </Pressable>
 
         {friends.length === 0 ? <Text style={{ color: colors.muted }}>No friends yet.</Text> : null}

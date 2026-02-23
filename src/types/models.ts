@@ -1,8 +1,14 @@
 export type ThemeMode = 'light' | 'dark';
 
-export type RouteName = 'home' | 'profile' | 'friends' | 'notifications' | 'chat';
+export type RouteName = 'home' | 'profile' | 'friends' | 'alerts' | 'notifications' | 'chat';
 
-export type NotificationType = 'ownership_concern' | 'ownership_claimed' | 'friend_added';
+export type NotificationType =
+  | 'ownership_concern'
+  | 'ownership_claimed'
+  | 'friend_request'
+  | 'friend_added'
+  | 'chat_mention'
+  | 'box_created';
 
 export type User = {
   id: string;
@@ -40,6 +46,7 @@ export type Notification = {
   type: NotificationType;
   createdAt: string;
   seenBy: string[];
+  closedAt?: string;
 };
 
 export type CommonBox = {

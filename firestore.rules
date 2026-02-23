@@ -9,6 +9,10 @@ service cloud.firestore {
       return signedIn() && request.auth.uid == userId;
     }
 
+    function isFriendByDoc(docData) {
+      return signedIn() && request.auth.uid in docData.friendIds;
+    }
+
     function boxExists(boxId) {
       return exists(/databases/$(database)/documents/boxes/$(boxId));
     }
@@ -24,7 +28,12 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      allow read: if signedIn();
+      allow get: if isSelf(userId) || isFriendByDoc(resource.data);
+      allow list: if signedIn()
+        && (
+          isFriendByDoc(resource.data)
+          || (request.query.limit != null && request.query.limit <= 1)
+        );
       allow create: if isSelf(userId)
         && request.resource.data.id == userId
         && request.resource.data.email is string
